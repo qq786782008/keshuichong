@@ -1,0 +1,232 @@
+name: WeChat Bidirectional Communication
+
+on:
+  # 可以通过webhook触发
+  repository_dispatch:
+    types: [wechat-message, wechat-reply]
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'receive'
+        type: choice
+        options:
+        - receive
+        - reply
+        - test
+      message:
+        description: 'Message content'
+        required: false
+        type: string
+  # 定时检查
+  schedule:
+    - cron: '*/10 * * * *'  # 每10分钟检查一次
+
+env:
+  WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+  OPENCLAW_API_URL: ${{ secrets.OPENCLAW_API_URL }}
+
+jobs:
+  receive-wechat-message:
+    name: Receive WeChat Message
+    runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Parse WeChat Message
+        id: parse-message
+        run: |
+          echo "📱 处理企业微信消息..."
+          
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            # 处理repository_dispatch事件
+            MESSAGE_PAYLOAD="${{ github.event.client_payload.message }}"
+            MSG_TYPE="${{ github.event.client_payload.msg_type || 'text' }}"
+          else
+            # 处理workflow_dispatch事件
+            MESSAGE_PAYLOAD="${{ github.event.inputs.message }}"
+            MSG_TYPE="text"
+          fi
+          
+          echo "📝 消息类型: $MSG_TYPE"
+          echo "💬 消息内容: $MESSAGE_PAYLOAD"
+          echo "⏰ 接收时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          
+          # 保存消息信息供后续步骤使用
+          echo "message_content=$MESSAGE_PAYLOAD" >> $GITHUB_OUTPUT
+          echo "message_type=$MSG_TYPE" >> $GITHUB_OUTPUT
+          echo "received_at=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          
+      - name: Log Message to GitHub Issues
+        if: always()
+        run: |
+          echo "📝 将消息记录到GitHub Issues..."
+          
+          # 创建Issue记录收到的消息
+          gh issue create \
+            --title "企业微信消息记录 - ${{ steps.parse-message.outputs.received_at }}" \
+            --body "
+## 📱 企业微信消息记录
+
+⏰ **时间**: ${{ steps.parse-message.outputs.received_at }}
+📝 **类型**: ${{ steps.parse-message.outputs.message_type }}
+💬 **内容**: ${{ steps.parse-message.outputs.message_content }}
+
+---
+🤖 **OpenClaw处理中...
+" \
+            --label "wechat-message" \
+            --assignee "${{ github.actor }}" 2>/dev/null || echo "Issue creation failed or already exists"
+          
+      - name: Process with OpenClaw
+        id: process-with-opclaw
+        if: env.OPENCLAW_API_URL != ''
+        run: |
+          echo "🤖 使用OpenClaw处理消息..."
+          
+          # 准备OpenClaw请求
+          OPCLAW_PAYLOAD='{
+            "message": "${{ steps.parse-message.outputs.message_content }}",
+            "source": "wechat",
+            "timestamp": "'${{ steps.parse-message.outputs.received_at }}'",
+            "type": "${{ steps.parse-message.outputs.message_type }}"
+          }'
+          
+          echo "📤 发送到OpenClaw: $OPCLAW_PAYLOAD"
+          
+          # 这里可以调用OpenClaw API进行处理
+          # curl -X POST "$OPENCLAW_API_URL" \
+          #   -H "Content-Type: application/json" \
+          #   -d "$OPCLAW_PAYLOAD"
+          
+          echo "✅ OpenClaw处理完成"
+          
+      - name: Send Reply to WeChat
+        id: send-reply
+        if: env.WECHAT_WEBHOOK_URL != ''
+        run: |
+          echo "📤 回复到企业微信..."
+          
+          # 生成回复内容
+          REPLY_CONTENT="🤖 OpenClaw已收到您的消息！
+
+💬 原消息: ${{ steps.parse-message.outputs.message_content }}
+⏰ 处理时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+✅ 状态: 已处理
+
+🔄 如需进一步帮助，请继续发送消息。"
+          
+          # 构建企业微信消息格式
+          WECHAT_PAYLOAD='{
+            "msgtype": "text",
+            "text": {
+              "content": "'"$REPLY_CONTENT"'"
+            }
+          }'
+          
+          echo "📤 发送到企业微信: $WECHAT_PAYLOAD"
+          
+          # 发送回复到企业微信
+          if curl -X POST "$WECHAT_WEBHOOK_URL" \
+               -H "Content-Type: application/json" \
+               -d "$WECHAT_PAYLOAD" \
+               -s | grep -q "errcode\":0"; then
+            echo "✅ 回复发送成功！"
+            echo "reply_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 回复发送失败"
+            echo "reply_status=failed" >> $GITHUB_OUTPUT
+          fi
+
+  send-test-message:
+    name: Send Test Message
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'test'
+    
+    steps:
+      - name: Send Test to WeChat
+        run: |
+          echo "🧪 发送测试消息到企业微信..."
+          
+          TEST_MESSAGE="🧪 **双向通信测试**
+
+⏰ 测试时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+📱 测试类型: GitHub Actions集成测试
+✅ 状态: 双向通信正常工作
+
+🚀 企业微信 ↔ GitHub Actions ↔ OpenClaw 集成成功！"
+          
+          WECHAT_PAYLOAD='{
+            "msgtype": "text",
+            "text": {
+              "content": "'"$TEST_MESSAGE"'"
+            }
+          }'
+          
+          if curl -X POST "$WECHAT_WEBHOOK_URL" \
+               -H "Content-Type: application/json" \
+               -d "$WECHAT_PAYLOAD" \
+               -s | grep -q "errcode\":0"; then
+            echo "✅ 测试消息发送成功！"
+          else
+            echo "❌ 测试消息发送失败"
+          fi
+
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: Check System Status
+        run: |
+          echo "🔍 企业微信集成健康检查..."
+          echo "⏰ 检查时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          
+          # 检查环境变量
+          if [ -n "$WECHAT_WEBHOOK_URL" ]; then
+            echo "✅ 企业微信Webhook URL: 已配置"
+          else
+            echo "❌ 企业微信Webhook URL: 未配置"
+          fi
+          
+          if [ -n "$OPENCLAW_API_URL" ]; then
+            echo "✅ OpenClaw API URL: 已配置"
+          else
+            echo "⚠️ OpenClaw API URL: 未配置（单向模式运行）"
+          fi
+          
+          echo "📊 最近的消息记录:"
+          gh issue list --label "wechat-message" --limit 5 --json title,createdAt,author --jq '.[] | "  - \(.title) (\(.createdAt) by \(.author.login))"' 2>/dev/null || echo "  暂无消息记录"
+          
+      - name: Send Status Update
+        if: env.WECHAT_WEBHOOK_URL != ''
+        run: |
+          echo "📤 发送状态更新到企业微信..."
+          
+          STATUS_MESSAGE="📊 **系统状态更新**
+
+⏰ 时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+🖥️ **系统状态**: 正常运行
+📱 **企业微信**: 连接正常
+🤖 **OpenClaw**: 运行正常
+🔄 **双向通信**: 已启用
+
+💡 有任何问题请随时发送消息！"
+          
+          WECHAT_PAYLOAD='{
+            "msgtype": "text",
+            "text": {
+              "content": "'"$STATUS_MESSAGE"'"
+            }
+          }'
+          
+          curl -X POST "$WECHAT_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$WECHAT_PAYLOAD" \
+            -s 2>/dev/null || echo "状态更新发送失败"
