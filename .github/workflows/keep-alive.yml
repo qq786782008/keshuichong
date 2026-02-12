@@ -1,0 +1,24 @@
+name: Codespace Keep-Alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # 每10分钟运行一次
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  keep-alive:
+    runs-on: codespace-${{ github.event_name == 'schedule' && 'remote' || 'local' }}
+    
+    steps:
+      - name: Trigger keep-alive
+        run: |
+          echo "Keep-alive workflow triggered at $(date)"
+          # 通过API触发OpenClaw操作
+          curl -X POST "https://turbo-garbanzo-j66rvwrjvg6h45j-18789.app.github.dev/chat" \
+            -H "Content-Type: application/json" \
+            -d '{"action": "keepalive", "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}' 2>/dev/null || true
+          
+          echo "Keep-alive workflow completed"
+          
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
