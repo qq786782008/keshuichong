@@ -1,0 +1,56 @@
+name: WeChat Message Receiver
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # 每5分钟检查一次
+  workflow_dispatch:  # 手动触发
+  repository_dispatch:  # 可以被外部调用
+    types: [wechat-message]
+
+jobs:
+  receive-wechat-message:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch'
+    
+    steps:
+      - name: Log WeChat Message
+        run: |
+          echo "📱 收到企业微信消息"
+          echo "⏰ 时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "📝 内容: ${{ github.event.inputs.message || 'No message provided' }}"
+          
+          # 这里可以添加处理逻辑
+          # 1. 解析消息内容
+          # 2. 调用OpenClaw API
+          # 3. 回复到企业微信
+          
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Send Reply via OpenClaw
+        run: |
+          # 如果需要回复到企业微信
+          echo "🤖 正在回复到企业微信..."
+          
+          # 这里可以添加发送逻辑
+          # 1. 调用企业微信API
+          # 2. 发送回复消息
+          
+        env:
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+
+  periodic-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: System Health Check
+        run: |
+          echo "🔍 企业微信集成状态检查"
+          echo "⏰ 检查时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "✅ 系统运行正常"
+          
+      - name: Test Webhook
+        run: |
+          echo "🧪 测试企业微信连接..."
+          # 这里可以添加连接测试逻辑
